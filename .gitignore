@@ -10,6 +10,7 @@ yarn-error.log*
 dist/
 build/
 .vercel
+out/
 
 # Environment variables
 .env
@@ -18,6 +19,7 @@ build/
 .env.test.local
 .env.production.local
 *.env
+!.env.example
 
 # IDEs and Editors
 .vscode/
@@ -27,12 +29,16 @@ build/
 .DS_Store
 Thumbs.db
 
-# Database (SQLite residues and others)
+# Database (SQLite and Postgres residues)
 *.db
 *.db-journal
 *.db-shm
 *.db-wal
 data.db
+.drizzle/
+
+# Supabase
+supabase/.temp/
 
 # Logs
 logs
