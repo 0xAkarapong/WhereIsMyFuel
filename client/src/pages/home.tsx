@@ -64,7 +64,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-sm font-bold leading-none tracking-tight">Where's My Fuel</h1>
-              <p className="text-[10px] text-muted-foreground leading-none mt-0.5">ค้นหาปั๊มน้ำมันทั่วไทย</p>
+              <p className="text-[10px] text-muted-foreground leading-none mt-0.5">เช็คน้ำมันทั่วไทย</p>
             </div>
           </div>
 
