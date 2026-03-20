@@ -187,13 +187,18 @@ export default function StationPanel({ station, onClose }: StationPanelProps) {
               data.reports.map((report) => (
                 <div key={report.reportId} className="flex items-center justify-between p-3 rounded-lg bg-card border border-card-border" data-testid={`report-${report.reportId}`}>
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <StatusBadge status={report.status} />
-                      <span className="text-xs font-medium">{FUEL_TYPES[report.fuelType] || report.fuelType}</span>
+                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-muted">
+                        {FUEL_TYPES[report.fuelType] || report.fuelType}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
                       <Clock className="w-3 h-3" />
                       {timeAgo(report.timestamp)}
+                      {report.votesConfirm && report.votesConfirm > 0 && (
+                        <span className="ml-2">• {report.votesConfirm} ยืนยัน</span>
+                      )}
                     </div>
                   </div>
                   <button
