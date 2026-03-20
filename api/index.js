@@ -13,6 +13,9 @@ app.use(express.urlencoded({ extended: false }));
 // --- Database Setup ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes("pooler.supabase.com") || process.env.DATABASE_URL?.includes("supabase.co")
+    ? { rejectUnauthorized: false }
+    : undefined,
 });
 
 // --- Helper Functions ---
