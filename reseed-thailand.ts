@@ -1,54 +1,45 @@
-import Database from "better-sqlite3";
+import { db } from "./server/storage";
+import { stations } from "./shared/schema";
 import fs from "fs";
 
-const db = new Database("data.db");
-db.pragma("journal_mode = WAL");
+async function reseed() {
+  // Read the Thailand-wide seed data
+  const seedData = JSON.parse(fs.readFileSync("seed-data-thailand.json", "utf-8"));
 
-// Read the Thailand-wide seed data
-const seedData = JSON.parse(fs.readFileSync("seed-data-thailand.json", "utf-8"));
+  console.log(`Loaded ${seedData.length} stations from seed-data-thailand.json`);
 
-console.log(`Loaded ${seedData.length} stations from seed-data-thailand.json`);
+  // Clear existing stations and re-seed
+  // Note: For Postgres, you might need to handle constraints if you have related data
+  await db.delete(stations);
+  console.log("Cleared existing stations");
 
-// Clear existing stations and re-seed
-db.exec("DELETE FROM stations");
-console.log("Cleared existing stations");
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < seedData.length; i += BATCH_SIZE) {
+    const batch = seedData.slice(i, i + BATCH_SIZE).map((s: any) => ({
+      placeId: s.placeId,
+      name: s.name,
+      brand: s.brand,
+      lat: s.lat,
+      lng: s.lng,
+      address: s.address || "",
+      isOpen24h: !!s.isOpen24h,
+      source: s.source || "openstreetmap",
+      status: "active",
+      lastSynced: new Date().toISOString()
+    }));
 
-// Insert in batches
-const insert = db.prepare(`
-  INSERT OR IGNORE INTO stations (place_id, name, brand, lat, lng, address, is_open_24h, source, status, last_synced)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-`);
-
-const batchInsert = db.transaction((batch: any[]) => {
-  for (const s of batch) {
-    insert.run(
-      s.placeId,
-      s.name,
-      s.brand,
-      s.lat,
-      s.lng,
-      s.address || "",
-      s.isOpen24h ? 1 : 0,
-      s.source || "openstreetmap",
-      new Date().toISOString()
-    );
+    await db.insert(stations).values(batch).onConflictDoNothing();
+    console.log(`Inserted batch ${Math.floor(i / BATCH_SIZE) + 1} (${Math.min(i + BATCH_SIZE, seedData.length)}/${seedData.length})`);
   }
+
+  const result = await db.select({ count: sql<number>`count(*)` }).from(stations);
+  console.log(`\nTotal stations in database: ${result[0].count}`);
+
+  process.exit(0);
+}
+
+import { sql } from "drizzle-orm";
+reseed().catch(err => {
+  console.error(err);
+  process.exit(1);
 });
-
-const BATCH_SIZE = 500;
-for (let i = 0; i < seedData.length; i += BATCH_SIZE) {
-  const batch = seedData.slice(i, i + BATCH_SIZE);
-  batchInsert(batch);
-  console.log(`Inserted batch ${Math.floor(i / BATCH_SIZE) + 1} (${Math.min(i + BATCH_SIZE, seedData.length)}/${seedData.length})`);
-}
-
-const count = db.prepare("SELECT COUNT(*) as c FROM stations").get() as any;
-console.log(`\nTotal stations in database: ${count.c}`);
-
-const brands = db.prepare("SELECT brand, COUNT(*) as c FROM stations GROUP BY brand ORDER BY c DESC").all();
-console.log("\nBrand breakdown:");
-for (const b of brands as any[]) {
-  console.log(`  ${b.brand}: ${b.c}`);
-}
-
-db.close();

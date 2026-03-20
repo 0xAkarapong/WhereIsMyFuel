@@ -6,185 +6,194 @@ import {
   type PendingStation, type InsertPendingStation,
   type RemovalRequest, type InsertRemovalRequest,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import { eq, and, desc, sql, like } from "drizzle-orm";
+import "dotenv/config";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
+if (!process.env.DATABASE_URL) {
+  console.error("ERROR: DATABASE_URL environment variable is missing.");
+  console.error("Please create a .env file and set DATABASE_URL to your Postgres connection string.");
+  process.exit(1);
+}
 
-export const db = drizzle(sqlite);
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+export const db = drizzle(pool);
 
 export interface IStorage {
   // Stations
-  getAllStations(): Station[];
-  getStationByPlaceId(placeId: string): Station | undefined;
-  createStation(station: InsertStation): Station;
-  updateStationStatus(placeId: string, status: string): void;
-  getStationCount(): number;
-  getStationCountByBrand(): { brand: string; count: number }[];
+  getAllStations(): Promise<Station[]>;
+  getStationByPlaceId(placeId: string): Promise<Station | undefined>;
+  createStation(station: InsertStation): Promise<Station>;
+  updateStationStatus(placeId: string, status: string): Promise<void>;
+  getStationCount(): Promise<number>;
+  getStationCountByBrand(): Promise<{ brand: string; count: number }[]>;
 
   // Fuel Reports
-  getAllReports(): FuelReport[];
-  getReportsForStation(placeId: string): FuelReport[];
-  createReport(report: InsertFuelReport): FuelReport;
-  getReportCount(): number;
-  getTodayReportCount(): number;
-  confirmReport(reportId: string): void;
-  deleteAllReports(): void;
+  getAllReports(): Promise<FuelReport[]>;
+  getReportsForStation(placeId: string): Promise<FuelReport[]>;
+  createReport(report: InsertFuelReport): Promise<FuelReport>;
+  getReportCount(): Promise<number>;
+  getTodayReportCount(): Promise<number>;
+  confirmReport(reportId: string): Promise<void>;
+  deleteAllReports(): Promise<void>;
 
   // Comments
-  getAllComments(): StationComment[];
-  getCommentsForStation(placeId: string): StationComment[];
-  createComment(comment: InsertComment): StationComment;
-  deleteComment(commentId: string): void;
-  getCommentCount(): number;
-  deleteAllComments(): void;
+  getAllComments(): Promise<StationComment[]>;
+  getCommentsForStation(placeId: string): Promise<StationComment[]>;
+  createComment(comment: InsertComment): Promise<StationComment>;
+  deleteComment(commentId: string): Promise<void>;
+  getCommentCount(): Promise<number>;
+  deleteAllComments(): Promise<void>;
 
   // Pending Stations
-  getAllPendingStations(): PendingStation[];
-  getPendingCount(): number;
-  createPendingStation(ps: InsertPendingStation): PendingStation;
-  approvePendingStation(requestId: string, note: string): void;
-  rejectPendingStation(requestId: string, note: string): void;
-  deleteAllPending(): void;
+  getAllPendingStations(): Promise<PendingStation[]>;
+  getPendingCount(): Promise<number>;
+  createPendingStation(ps: InsertPendingStation): Promise<PendingStation>;
+  approvePendingStation(requestId: string, note: string): Promise<void>;
+  rejectPendingStation(requestId: string, note: string): Promise<void>;
+  deleteAllPending(): Promise<void>;
 
   // Removal Requests
-  getAllRemovalRequests(): RemovalRequest[];
-  createRemovalRequest(rr: InsertRemovalRequest): RemovalRequest;
-  approveRemoval(requestId: string): void;
-  rejectRemoval(requestId: string): void;
-  deleteAllRemovals(): void;
+  getAllRemovalRequests(): Promise<RemovalRequest[]>;
+  createRemovalRequest(rr: InsertRemovalRequest): Promise<RemovalRequest>;
+  approveRemoval(requestId: string): Promise<void>;
+  rejectRemoval(requestId: string): Promise<void>;
+  deleteAllRemovals(): Promise<void>;
 
   // Rate Limits
-  checkRateLimit(ipHash: string, placeId: string): boolean;
-  recordReport(ipHash: string, placeId: string): void;
+  checkRateLimit(ipHash: string, placeId: string): Promise<boolean>;
+  recordReport(ipHash: string, placeId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
   // === Stations ===
-  getAllStations(): Station[] {
-    return db.select().from(stations).where(eq(stations.status, "active")).all();
+  async getAllStations(): Promise<Station[]> {
+    return await db.select().from(stations).where(eq(stations.status, "active"));
   }
 
-  getStationByPlaceId(placeId: string): Station | undefined {
-    return db.select().from(stations).where(eq(stations.placeId, placeId)).get();
+  async getStationByPlaceId(placeId: string): Promise<Station | undefined> {
+    const [station] = await db.select().from(stations).where(eq(stations.placeId, placeId));
+    return station;
   }
 
-  createStation(station: InsertStation): Station {
-    return db.insert(stations).values(station).returning().get();
+  async createStation(station: InsertStation): Promise<Station> {
+    const [newStation] = await db.insert(stations).values(station).returning();
+    return newStation;
   }
 
-  updateStationStatus(placeId: string, status: string): void {
-    db.update(stations).set({ status }).where(eq(stations.placeId, placeId)).run();
+  async updateStationStatus(placeId: string, status: string): Promise<void> {
+    await db.update(stations).set({ status }).where(eq(stations.placeId, placeId));
   }
 
-  getStationCount(): number {
-    const result = db.select({ count: sql<number>`count(*)` }).from(stations).where(eq(stations.status, "active")).get();
-    return result?.count ?? 0;
+  async getStationCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(stations).where(eq(stations.status, "active"));
+    return Number(result[0]?.count ?? 0);
   }
 
-  getStationCountByBrand(): { brand: string; count: number }[] {
-    return db.select({
+  async getStationCountByBrand(): Promise<{ brand: string; count: number }[]> {
+    const results = await db.select({
       brand: stations.brand,
       count: sql<number>`count(*)`,
-    }).from(stations).where(eq(stations.status, "active")).groupBy(stations.brand).all();
+    }).from(stations).where(eq(stations.status, "active")).groupBy(stations.brand);
+    return results.map(r => ({ ...r, count: Number(r.count) }));
   }
 
   // === Fuel Reports ===
-  getAllReports(): FuelReport[] {
-    return db.select().from(fuelReports).orderBy(desc(fuelReports.timestamp)).all();
+  async getAllReports(): Promise<FuelReport[]> {
+    return await db.select().from(fuelReports).orderBy(desc(fuelReports.timestamp));
   }
 
-  getReportsForStation(placeId: string): FuelReport[] {
+  async getReportsForStation(placeId: string): Promise<FuelReport[]> {
     // Get reports from the last 60 minutes
     const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    return db.select().from(fuelReports)
+    return await db.select().from(fuelReports)
       .where(and(eq(fuelReports.placeId, placeId), sql`${fuelReports.timestamp} > ${cutoff}`))
-      .orderBy(desc(fuelReports.timestamp))
-      .all();
+      .orderBy(desc(fuelReports.timestamp));
   }
 
-  createReport(report: InsertFuelReport): FuelReport {
-    return db.insert(fuelReports).values(report).returning().get();
+  async createReport(report: InsertFuelReport): Promise<FuelReport> {
+    const [newReport] = await db.insert(fuelReports).values(report).returning();
+    return newReport;
   }
 
-  getReportCount(): number {
-    const result = db.select({ count: sql<number>`count(*)` }).from(fuelReports).get();
-    return result?.count ?? 0;
+  async getReportCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(fuelReports);
+    return Number(result[0]?.count ?? 0);
   }
 
-  getTodayReportCount(): number {
+  async getTodayReportCount(): Promise<number> {
     const today = new Date().toISOString().split("T")[0];
-    const result = db.select({ count: sql<number>`count(*)` }).from(fuelReports)
-      .where(sql`${fuelReports.timestamp} LIKE ${today + '%'}`)
-      .get();
-    return result?.count ?? 0;
+    const result = await db.select({ count: sql<number>`count(*)` }).from(fuelReports)
+      .where(like(fuelReports.timestamp, `${today}%`));
+    return Number(result[0]?.count ?? 0);
   }
 
-  confirmReport(reportId: string): void {
-    db.update(fuelReports)
+  async confirmReport(reportId: string): Promise<void> {
+    await db.update(fuelReports)
       .set({ votesConfirm: sql`${fuelReports.votesConfirm} + 1` })
-      .where(eq(fuelReports.reportId, reportId))
-      .run();
+      .where(eq(fuelReports.reportId, reportId));
   }
 
-  deleteAllReports(): void {
-    db.delete(fuelReports).run();
+  async deleteAllReports(): Promise<void> {
+    await db.delete(fuelReports);
   }
 
   // === Comments ===
-  getAllComments(): StationComment[] {
-    return db.select().from(stationComments).orderBy(desc(stationComments.timestamp)).all();
+  async getAllComments(): Promise<StationComment[]> {
+    return await db.select().from(stationComments).orderBy(desc(stationComments.timestamp));
   }
 
-  getCommentsForStation(placeId: string): StationComment[] {
-    return db.select().from(stationComments)
+  async getCommentsForStation(placeId: string): Promise<StationComment[]> {
+    return await db.select().from(stationComments)
       .where(eq(stationComments.placeId, placeId))
-      .orderBy(desc(stationComments.timestamp))
-      .all();
+      .orderBy(desc(stationComments.timestamp));
   }
 
-  createComment(comment: InsertComment): StationComment {
-    return db.insert(stationComments).values(comment).returning().get();
+  async createComment(comment: InsertComment): Promise<StationComment> {
+    const [newComment] = await db.insert(stationComments).values(comment).returning();
+    return newComment;
   }
 
-  deleteComment(commentId: string): void {
-    db.delete(stationComments).where(eq(stationComments.commentId, commentId)).run();
+  async deleteComment(commentId: string): Promise<void> {
+    await db.delete(stationComments).where(eq(stationComments.commentId, commentId));
   }
 
-  getCommentCount(): number {
-    const result = db.select({ count: sql<number>`count(*)` }).from(stationComments).get();
-    return result?.count ?? 0;
+  async getCommentCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(stationComments);
+    return Number(result[0]?.count ?? 0);
   }
 
-  deleteAllComments(): void {
-    db.delete(stationComments).run();
+  async deleteAllComments(): Promise<void> {
+    await db.delete(stationComments);
   }
 
   // === Pending Stations ===
-  getAllPendingStations(): PendingStation[] {
-    return db.select().from(pendingStations).orderBy(desc(pendingStations.timestamp)).all();
+  async getAllPendingStations(): Promise<PendingStation[]> {
+    return await db.select().from(pendingStations).orderBy(desc(pendingStations.timestamp));
   }
 
-  getPendingCount(): number {
-    const result = db.select({ count: sql<number>`count(*)` }).from(pendingStations)
-      .where(eq(pendingStations.status, "pending"))
-      .get();
-    return result?.count ?? 0;
+  async getPendingCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(pendingStations)
+      .where(eq(pendingStations.status, "pending"));
+    return Number(result[0]?.count ?? 0);
   }
 
-  createPendingStation(ps: InsertPendingStation): PendingStation {
-    return db.insert(pendingStations).values(ps).returning().get();
+  async createPendingStation(ps: InsertPendingStation): Promise<PendingStation> {
+    const [newPending] = await db.insert(pendingStations).values(ps).returning();
+    return newPending;
   }
 
-  approvePendingStation(requestId: string, note: string): void {
-    const pending = db.select().from(pendingStations).where(eq(pendingStations.requestId, requestId)).get();
+  async approvePendingStation(requestId: string, note: string): Promise<void> {
+    const [pending] = await db.select().from(pendingStations).where(eq(pendingStations.requestId, requestId));
     if (!pending) return;
 
     // Add station to main stations table
     const newPlaceId = `manual-${Date.now()}`;
-    db.insert(stations).values({
+    await db.insert(stations).values({
       placeId: newPlaceId,
       name: pending.stationName,
       brand: pending.brand ?? "อื่นๆ",
@@ -193,93 +202,94 @@ export class DatabaseStorage implements IStorage {
       source: "manual",
       status: "active",
       lastSynced: new Date().toISOString(),
-    }).run();
+    });
 
-    db.update(pendingStations).set({
+    await db.update(pendingStations).set({
       status: "approved",
       reviewedAt: new Date().toISOString(),
       note,
-    }).where(eq(pendingStations.requestId, requestId)).run();
+    }).where(eq(pendingStations.requestId, requestId));
   }
 
-  rejectPendingStation(requestId: string, note: string): void {
-    db.update(pendingStations).set({
+  async rejectPendingStation(requestId: string, note: string): Promise<void> {
+    await db.update(pendingStations).set({
       status: "rejected",
       reviewedAt: new Date().toISOString(),
       note,
-    }).where(eq(pendingStations.requestId, requestId)).run();
+    }).where(eq(pendingStations.requestId, requestId));
   }
 
-  deleteAllPending(): void {
-    db.delete(pendingStations).run();
+  async deleteAllPending(): Promise<void> {
+    await db.delete(pendingStations);
   }
 
   // === Removal Requests ===
-  getAllRemovalRequests(): RemovalRequest[] {
-    return db.select().from(removalRequests).orderBy(desc(removalRequests.timestamp)).all();
+  async getAllRemovalRequests(): Promise<RemovalRequest[]> {
+    return await db.select().from(removalRequests).orderBy(desc(removalRequests.timestamp));
   }
 
-  createRemovalRequest(rr: InsertRemovalRequest): RemovalRequest {
-    return db.insert(removalRequests).values(rr).returning().get();
+  async createRemovalRequest(rr: InsertRemovalRequest): Promise<RemovalRequest> {
+    const [newRemoval] = await db.insert(removalRequests).values(rr).returning();
+    return newRemoval;
   }
 
-  approveRemoval(requestId: string): void {
-    const req = db.select().from(removalRequests).where(eq(removalRequests.requestId, requestId)).get();
+  async approveRemoval(requestId: string): Promise<void> {
+    const [req] = await db.select().from(removalRequests).where(eq(removalRequests.requestId, requestId));
     if (!req) return;
 
     // Mark station as removed
-    this.updateStationStatus(req.placeId, "removed");
+    await this.updateStationStatus(req.placeId, "removed");
 
-    db.update(removalRequests).set({ status: "approved" })
-      .where(eq(removalRequests.requestId, requestId)).run();
+    await db.update(removalRequests).set({ status: "approved" })
+      .where(eq(removalRequests.requestId, requestId));
   }
 
-  rejectRemoval(requestId: string): void {
-    db.update(removalRequests).set({ status: "rejected" })
-      .where(eq(removalRequests.requestId, requestId)).run();
+  async rejectRemoval(requestId: string): Promise<void> {
+    await db.update(removalRequests).set({ status: "rejected" })
+      .where(eq(removalRequests.requestId, requestId));
   }
 
-  deleteAllRemovals(): void {
-    db.delete(removalRequests).run();
+  async deleteAllRemovals(): Promise<void> {
+    await db.delete(removalRequests);
   }
 
   // === Rate Limits ===
-  checkRateLimit(ipHash: string, placeId: string): boolean {
+  async checkRateLimit(ipHash: string, placeId: string): Promise<boolean> {
     const today = new Date().toISOString().split("T")[0];
-    const record = db.select().from(rateLimits)
+    const [record] = await db.select().from(rateLimits)
       .where(and(
         eq(rateLimits.ipHash, ipHash),
         eq(rateLimits.placeId, placeId),
         eq(rateLimits.date, today)
-      )).get();
+      ));
 
     if (!record) return true; // No limit yet
     // Max 10 reports per station per IP per day
     return (record.dailyRequests ?? 0) < 10;
   }
 
-  recordReport(ipHash: string, placeId: string): void {
+  async recordReport(ipHash: string, placeId: string): Promise<void> {
     const today = new Date().toISOString().split("T")[0];
-    const existing = db.select().from(rateLimits)
+    const [existing] = await db.select().from(rateLimits)
       .where(and(
         eq(rateLimits.ipHash, ipHash),
         eq(rateLimits.placeId, placeId),
         eq(rateLimits.date, today)
-      )).get();
+      ));
 
     if (existing) {
-      db.update(rateLimits).set({
+      await db.update(rateLimits).set({
         dailyRequests: sql`${rateLimits.dailyRequests} + 1`,
         lastReport: new Date().toISOString(),
-      }).where(eq(rateLimits.id, existing.id)).run();
+      }).where(eq(rateLimits.id, existing.id));
     } else {
-      db.insert(rateLimits).values({
+      await db.insert(rateLimits).values({
         ipHash: ipHash,
         placeId: placeId,
         lastReport: new Date().toISOString(),
         dailyRequests: 1,
         date: today,
-      }).run();
+      });
     }
   }
 }

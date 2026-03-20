@@ -26,25 +26,25 @@ export async function registerRoutes(
   // === Public API ===
 
   // Get all active stations
-  app.get("/api/stations", (_req, res) => {
-    const stationList = storage.getAllStations();
+  app.get("/api/stations", async (_req, res) => {
+    const stationList = await storage.getAllStations();
     res.json(stationList);
   });
 
   // Get station detail with reports and comments
-  app.get("/api/stations/:placeId", (req, res) => {
+  app.get("/api/stations/:placeId", async (req, res) => {
     const { placeId } = req.params;
-    const station = storage.getStationByPlaceId(placeId);
+    const station = await storage.getStationByPlaceId(placeId);
     if (!station) {
       return res.status(404).json({ error: "Station not found" });
     }
-    const reports = storage.getReportsForStation(placeId);
-    const comments = storage.getCommentsForStation(placeId);
+    const reports = await storage.getReportsForStation(placeId);
+    const comments = await storage.getCommentsForStation(placeId);
     res.json({ station, reports, comments });
   });
 
   // Submit fuel report
-  app.post("/api/reports", (req, res) => {
+  app.post("/api/reports", async (req, res) => {
     const schema = z.object({
       placeId: z.string(),
       stationName: z.string(),
@@ -64,11 +64,11 @@ export async function registerRoutes(
     const ip = getClientIp(req);
     const ipHash = hashIp(ip);
 
-    if (!storage.checkRateLimit(ipHash, parsed.data.placeId)) {
+    if (!(await storage.checkRateLimit(ipHash, parsed.data.placeId))) {
       return res.status(429).json({ error: "รายงานเกินจำนวนที่กำหนด กรุณารอสักครู่" });
     }
 
-    const report = storage.createReport({
+    const report = await storage.createReport({
       reportId: generateId("RPT"),
       placeId: parsed.data.placeId,
       stationName: parsed.data.stationName,
@@ -83,19 +83,19 @@ export async function registerRoutes(
       votesConfirm: 0,
     });
 
-    storage.recordReport(ipHash, parsed.data.placeId);
+    await storage.recordReport(ipHash, parsed.data.placeId);
     res.json(report);
   });
 
   // Confirm a report (vote)
-  app.post("/api/reports/:reportId/confirm", (req, res) => {
+  app.post("/api/reports/:reportId/confirm", async (req, res) => {
     const { reportId } = req.params;
-    storage.confirmReport(reportId);
+    await storage.confirmReport(reportId);
     res.json({ success: true });
   });
 
   // Submit comment
-  app.post("/api/comments", (req, res) => {
+  app.post("/api/comments", async (req, res) => {
     const schema = z.object({
       placeId: z.string(),
       stationName: z.string(),
@@ -110,7 +110,7 @@ export async function registerRoutes(
     const ip = getClientIp(req);
     const ipHash = hashIp(ip);
 
-    const comment = storage.createComment({
+    const comment = await storage.createComment({
       commentId: generateId("CMT"),
       placeId: parsed.data.placeId,
       stationName: parsed.data.stationName,
@@ -123,7 +123,7 @@ export async function registerRoutes(
   });
 
   // Submit pending station request
-  app.post("/api/pending-stations", (req, res) => {
+  app.post("/api/pending-stations", async (req, res) => {
     const schema = z.object({
       stationName: z.string().min(1),
       brand: z.string().optional(),
@@ -139,7 +139,7 @@ export async function registerRoutes(
     const ip = getClientIp(req);
     const ipHash = hashIp(ip);
 
-    const pending = storage.createPendingStation({
+    const pending = await storage.createPendingStation({
       requestId: generateId("REQ"),
       stationName: parsed.data.stationName,
       brand: parsed.data.brand || "อื่นๆ",
@@ -154,7 +154,7 @@ export async function registerRoutes(
   });
 
   // Submit removal request
-  app.post("/api/removal-requests", (req, res) => {
+  app.post("/api/removal-requests", async (req, res) => {
     const schema = z.object({
       placeId: z.string(),
       stationName: z.string(),
@@ -169,7 +169,7 @@ export async function registerRoutes(
     const ip = getClientIp(req);
     const ipHash = hashIp(ip);
 
-    const removal = storage.createRemovalRequest({
+    const removal = await storage.createRemovalRequest({
       requestId: generateId("DEL"),
       placeId: parsed.data.placeId,
       stationName: parsed.data.stationName,
@@ -204,75 +204,75 @@ export async function registerRoutes(
   }
 
   // Admin dashboard stats
-  app.get("/api/admin/stats", adminAuth, (_req, res) => {
+  app.get("/api/admin/stats", adminAuth, async (_req, res) => {
     res.json({
-      totalStations: storage.getStationCount(),
-      totalReports: storage.getReportCount(),
-      todayReports: storage.getTodayReportCount(),
-      pendingRequests: storage.getPendingCount(),
-      totalComments: storage.getCommentCount(),
-      brandStats: storage.getStationCountByBrand(),
+      totalStations: await storage.getStationCount(),
+      totalReports: await storage.getReportCount(),
+      todayReports: await storage.getTodayReportCount(),
+      pendingRequests: await storage.getPendingCount(),
+      totalComments: await storage.getCommentCount(),
+      brandStats: await storage.getStationCountByBrand(),
     });
   });
 
   // Admin: get all reports
-  app.get("/api/admin/reports", adminAuth, (_req, res) => {
-    res.json(storage.getAllReports());
+  app.get("/api/admin/reports", adminAuth, async (_req, res) => {
+    res.json(await storage.getAllReports());
   });
 
   // Admin: get all comments
-  app.get("/api/admin/comments", adminAuth, (_req, res) => {
-    res.json(storage.getAllComments());
+  app.get("/api/admin/comments", adminAuth, async (_req, res) => {
+    res.json(await storage.getAllComments());
   });
 
   // Admin: delete comment
-  app.delete("/api/admin/comments/:commentId", adminAuth, (req, res) => {
-    storage.deleteComment(req.params.commentId);
+  app.delete("/api/admin/comments/:commentId", adminAuth, async (req, res) => {
+    await storage.deleteComment(req.params.commentId);
     res.json({ success: true });
   });
 
   // Admin: get pending stations
-  app.get("/api/admin/pending-stations", adminAuth, (_req, res) => {
-    res.json(storage.getAllPendingStations());
+  app.get("/api/admin/pending-stations", adminAuth, async (_req, res) => {
+    res.json(await storage.getAllPendingStations());
   });
 
   // Admin: approve pending
-  app.post("/api/admin/pending-stations/:requestId/approve", adminAuth, (req, res) => {
-    storage.approvePendingStation(req.params.requestId, req.body.note || "");
+  app.post("/api/admin/pending-stations/:requestId/approve", adminAuth, async (req, res) => {
+    await storage.approvePendingStation(req.params.requestId, req.body.note || "");
     res.json({ success: true });
   });
 
   // Admin: reject pending
-  app.post("/api/admin/pending-stations/:requestId/reject", adminAuth, (req, res) => {
-    storage.rejectPendingStation(req.params.requestId, req.body.note || "");
+  app.post("/api/admin/pending-stations/:requestId/reject", adminAuth, async (req, res) => {
+    await storage.rejectPendingStation(req.params.requestId, req.body.note || "");
     res.json({ success: true });
   });
 
   // Admin: get removal requests
-  app.get("/api/admin/removal-requests", adminAuth, (_req, res) => {
-    res.json(storage.getAllRemovalRequests());
+  app.get("/api/admin/removal-requests", adminAuth, async (_req, res) => {
+    res.json(await storage.getAllRemovalRequests());
   });
 
   // Admin: approve removal
-  app.post("/api/admin/removal-requests/:requestId/approve", adminAuth, (req, res) => {
-    storage.approveRemoval(req.params.requestId);
+  app.post("/api/admin/removal-requests/:requestId/approve", adminAuth, async (req, res) => {
+    await storage.approveRemoval(req.params.requestId);
     res.json({ success: true });
   });
 
   // Admin: reject removal
-  app.post("/api/admin/removal-requests/:requestId/reject", adminAuth, (req, res) => {
-    storage.rejectRemoval(req.params.requestId);
+  app.post("/api/admin/removal-requests/:requestId/reject", adminAuth, async (req, res) => {
+    await storage.rejectRemoval(req.params.requestId);
     res.json({ success: true });
   });
 
   // Admin: tools - clear data
-  app.post("/api/admin/clear/:type", adminAuth, (req, res) => {
+  app.post("/api/admin/clear/:type", adminAuth, async (req, res) => {
     const { type } = req.params;
     switch (type) {
-      case "reports": storage.deleteAllReports(); break;
-      case "pending": storage.deleteAllPending(); break;
-      case "removals": storage.deleteAllRemovals(); break;
-      case "comments": storage.deleteAllComments(); break;
+      case "reports": await storage.deleteAllReports(); break;
+      case "pending": await storage.deleteAllPending(); break;
+      case "removals": await storage.deleteAllRemovals(); break;
+      case "comments": await storage.deleteAllComments(); break;
       default: return res.status(400).json({ error: "Invalid type" });
     }
     res.json({ success: true });
